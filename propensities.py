@@ -11,14 +11,19 @@ from Bio.PDB import PDBParser, DSSP
 from Bio.PDB.Polypeptide import PPBuilder
 
 HELICES = ["H", "G", "I"]
+WEIGHT_HELIX = 1
 BETA_STRANDS = ["E"]
+WEIGHT_STRAND = 2
 LOOPS = ["-", "T"]
+WEIGHT_LOOP = 3
 BENDS = ["S", "B"]
+WEIGHT_TURN = 4
 
 LBL_HELIX = "HELIX"
 LBL_SHEETS = "SHEET"
 LBL_LOOPS = "LOOPS"
 LBL_BENDS = "BENDS"
+
 
 def get_type(l):
     if l in HELICES:
@@ -40,12 +45,12 @@ class ProteinModel(Model):
     bends = UInt64Field()
     sequence = StringField()
     ss = StringField()
-    pattern = ArrayField(inner_field=UInt64Field())
+    pattern = StringField()
     processdate = DateField(default=date.today())
 
     @classmethod
     def table_name(cls):
-        return "Proteins"
+        return "proteins"
 
 
 class StructureModel(Model):
@@ -55,9 +60,9 @@ class StructureModel(Model):
     pos = UInt64Field()
     size = UInt64Field()
     sequence = StringField()
-    residues = ArrayField(inner_field=UInt64Field())
-    sasa = ArrayField(inner_field=Float64Field())
-    pattern = ArrayField(inner_field=UInt64Field())
+    residues = ArrayField(inner_field=UInt8Field())
+    sasa = ArrayField(inner_field=Float32Field())
+    pattern = ArrayField(inner_field=UInt8Field())
     processdate = DateField(default=date.today())
 
     @classmethod
@@ -196,6 +201,23 @@ class PropensityManager(object):
                 pdb_file = os.path.join(root, file)
                 self.process_single_pdb(pdb_file)
 
+    def get_secondary_pattern(self, ss):
+        ss_pattern = []
+        for index, item in enumerate(ss):
+            if item in HELICES:
+                ss_pattern.append('H')
+
+            elif item in BETA_STRANDS:
+                ss_pattern.append('S')
+
+            elif item in LOOPS:
+                ss_pattern.append('L')
+
+            else:
+                ss_pattern.append('T')
+
+        return "".join(ss_pattern)
+
     def process_single_pdb(self, pdb_file):
         print("Processing File : {0}".format(pdb_file))
         name, sequence, ss, sasa = self.get_secondary_structure_details(pdb_file)
@@ -209,39 +231,41 @@ class PropensityManager(object):
         protein.loops = sequence.count('-') + sequence.count('T')
         protein.bends = sequence.count('S') + sequence.count('B')
         protein.sequence = str(sequence)
+        asa = [1 if a >= self.args.cutoff else 0 for a in sasa]
+        ss = self.get_secondary_pattern(ss)
         protein.ss = ss
-        protein.pattern = [1 if a >= self.args.cutoff else 0 for a in sasa]
+        protein.pattern = "".join([str(x) for x in asa])
         self.__insert__(models=[protein])
         self.db[name] = {
             "protein": protein.to_dict(),
             "structures": {}
         }
-        index = 1
-        # create secondary structures for this protein
-        for keys , structure , solvents in self.prepare_structures(name,sequence,ss,sasa):
-            newStructure = StructureModel()
-            newStructure.protein_id = name
-            newStructure.ss_id = "{0}_{1}".format(name,index)
-            type = get_type(structure.values()[0])
-            newStructure.type = type
-            newStructure.pos = keys[0]
-            newStructure.size = len(keys)
-            seq = sequence[keys[0]:keys[-1]+1]
-            newStructure.sequence = str(seq)
-            frequencies = [0] * len(residues.keys())
-            for res in residues.keys():
-                frequencies[residues.keys().index(res)] = str(seq).count(res)
-            newStructure.residues = frequencies
-            newStructure.sasa = solvents.values()
-            newStructure.pattern = [1 if a >= self.args.cutoff else 0 for a in solvents.values()]
-            if type in self.db[name]['structures'].keys():
-                structures_list = self.db[name]['structures'][type]
-                structures_list.append(newStructure.to_dict())
-            else:
-                self.db[name]['structures'][type] = [newStructure.to_dict()]
-            self.__insert__(models=[newStructure])
-
-            index += 1
+        # index = 1
+        # # create secondary structures for this protein
+        # for keys, structure, solvents in self.prepare_structures(name, sequence, ss, sasa):
+        #     newStructure = StructureModel()
+        #     newStructure.protein_id = name
+        #     newStructure.ss_id = "{0}_{1}".format(name, index)
+        #     type = get_type(structure.values()[0])
+        #     newStructure.type = type
+        #     newStructure.pos = keys[0]
+        #     newStructure.size = len(keys)
+        #     seq = sequence[keys[0]:keys[-1] + 1]
+        #     newStructure.sequence = str(seq)
+        #     frequencies = [0] * len(residues.keys())
+        #     for res in residues.keys():
+        #         frequencies[residues.keys().index(res)] = str(seq).count(res)
+        #     newStructure.residues = frequencies
+        #     newStructure.sasa = solvents.values()
+        #     newStructure.pattern = [1 if a >= self.args.cutoff else 0 for a in solvents.values()]
+        #     if type in self.db[name]['structures'].keys():
+        #         structures_list = self.db[name]['structures'][type]
+        #         structures_list.append(newStructure.to_dict())
+        #     else:
+        #         self.db[name]['structures'][type] = [newStructure.to_dict()]
+        #     self.__insert__(models=[newStructure])
+        #
+        #     index += 1
 
     def get_secondary_structure_details(self, pdb_file):
         parser = PDBParser()
@@ -263,7 +287,7 @@ class PropensityManager(object):
         solvents = OrderedDict()
         structure[0] = first
         solvents[0] = sasa[0]
-        for i in range(1,len(ss)):
+        for i in range(1, len(ss)):
             next = ss[i]
             if next == first:
                 structure[i] = next
@@ -271,7 +295,7 @@ class PropensityManager(object):
                 continue
             else:
                 sorted_keys = sorted(structure.keys())
-                yield sorted_keys , structure , solvents
+                yield sorted_keys, structure, solvents
                 structure.clear()
                 solvents.clear()
                 first = next
@@ -280,11 +304,9 @@ class PropensityManager(object):
 
         if len(structure.keys()) > 0:
             sorted_keys = sorted(structure.keys())
-            yield sorted_keys , structure , solvents
+            yield sorted_keys, structure, solvents
             structure.clear()
             solvents.clear()
-
-
 
 
 if __name__ == '__main__':
