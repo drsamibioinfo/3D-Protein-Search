@@ -9,6 +9,7 @@ from infi.clickhouse_orm.fields import *
 from datetime import date
 from Bio.PDB import PDBParser, DSSP
 from Bio.PDB.Polypeptide import PPBuilder
+import gzip
 
 HELICES = ["H", "G", "I"]
 WEIGHT_HELIX = 1
@@ -77,6 +78,7 @@ class MemoryDatabase(dict):
         else:
             super(MemoryDatabase, self).__init__()
 
+
     def contains(self, k):
         return k in self.keys()
 
@@ -106,6 +108,7 @@ class PropensityManager(object):
     def __init__(self):
         self.args = None
         self.db = MemoryDatabase()  # empty in memory database to use
+        self.memory = {}
         self.p = argparse.ArgumentParser(description="This program will calculate different residues propensities in "
                                                      "3D structures of proteins to extract statistical knowledge and "
                                                      "their distribution in different proteins structural motifs")
@@ -180,25 +183,38 @@ class PropensityManager(object):
                 self.parse_files(root, files)
 
         except Exception as e:
-            print (e.message)
             self.save_db()
+            raise e
         finally:
             self.save_db()
+
+    def __prepare_file__(self, file):
+        if file.endswith('ent') or file.endswith('pdb'):
+            return file
+        elif file.endswith('gz'):
+            loc, file_name = os.path.split(file)
+            file_name = file_name.replace('pdb', '').replace('.gz', '')
+            with open(os.path.join(loc, file_name), mode='wb') as writer:
+                with gzip.open(file, mode='rb') as gzipped:
+                    response = gzipped.read()
+                    writer.write(response)
+            #TODO: Uncomment this line when you run in production to save space
+            #os.remove(file)
+            return os.path.join(loc, file_name)
+        else:
+            return file
 
     def parse_files(self, root, files):
         # Process multiple PDB files simultaneously on multiple cores
         if self.args.multiprocessing:
             with Pool() as p:
                 for file in files:
-                    if not str(file).endswith('pdb'):
-                        continue
                     pdb_file = os.path.join(root, file)
-                    p.map(self.process_single_pdb, pdb_file)
+                    p.map(self.process_single_pdb, self.__prepare_file__(pdb_file))
         else:
             for file in files:
-                if not str(file).endswith('pdb'):
-                    continue
                 pdb_file = os.path.join(root, file)
+                pdb_file = self.__prepare_file__(pdb_file)
                 self.process_single_pdb(pdb_file)
 
     def get_secondary_pattern(self, ss):
@@ -218,9 +234,56 @@ class PropensityManager(object):
 
         return "".join(ss_pattern)
 
+    def process_stats(self, protein):
+        """
+        This method calculates frequencies of occurrences for the 20 essential residues in different protein secondary structures (H,S,L,T,B) as well as
+        calculates the frequencies of them in hydrophobicity/polarity.
+        :param protein: The protein Model which contains all necessary properties defining the current protein
+        :return: Nothing
+        """
+        total_residues = "total_residues"
+        sequence = protein.sequence
+        ss = protein.ss
+        pattern = protein.pattern
+        for index , res in enumerate(sequence):
+            sec_struct = ss[index]
+            sasa = pattern[index]
+            key = "P" if sasa > 0 else "H"
+            if not self.db.has_key(sec_struct):
+                freqs = [0] * len(residues.keys())
+            else:
+                freqs = self.db[sec_struct]
+            freqs[residues.keys().index(res)] += 1
+            self.db[sec_struct] = freqs
+            sec_struct_total = "{0}_total".format(sec_struct)
+            if self.db.has_key(sec_struct_total):
+                self.db[sec_struct_total] += 1
+            else:
+                self.db[sec_struct_total] = 1
+            # calculate solvent-accessible area frequencies
+            if not self.db.has_key(key):
+                patterning = [0] * len(residues.keys())
+            else:
+                patterning = self.db[key]
+            patterning[residues.keys().index(res)] += 1
+            self.db[key] = patterning
+            if not self.db.has_key(total_residues):
+                self.db[total_residues] = 1
+            else:
+                self.db[total_residues] += 1
+
+        if self.db.has_key("total"):
+            self.db["total"] += 1
+        else:
+            self.db["total"] = 1
+
     def process_single_pdb(self, pdb_file):
+        base_name = os.path.basename(pdb_file)
+        name, _ = os.path.splitext(base_name)
+        if self.memory.has_key(name):
+            return
         print("Processing File : {0}".format(pdb_file))
-        name, sequence, ss, sasa = self.get_secondary_structure_details(pdb_file)
+        _ , sequence, ss, sasa = self.get_secondary_structure_details(name,pdb_file)
         if len(sequence) != len(ss):
             return
         protein = ProteinModel()
@@ -236,10 +299,11 @@ class PropensityManager(object):
         protein.ss = ss
         protein.pattern = "".join([str(x) for x in asa])
         self.__insert__(models=[protein])
-        self.db[name] = {
-            "protein": protein.to_dict(),
-            "structures": {}
-        }
+        self.process_stats(protein)
+        self.memory[name] = 1
+
+
+
         # index = 1
         # # create secondary structures for this protein
         # for keys, structure, solvents in self.prepare_structures(name, sequence, ss, sasa):
@@ -267,10 +331,8 @@ class PropensityManager(object):
         #
         #     index += 1
 
-    def get_secondary_structure_details(self, pdb_file):
+    def get_secondary_structure_details(self,name, pdb_file):
         parser = PDBParser()
-        base_name = os.path.basename(pdb_file)
-        name, _ = os.path.splitext(base_name)
         structure = parser.get_structure(name, pdb_file)
         dssp = DSSP(structure[0], pdb_file, acc_array="Wilke")
         ss = "".join([aa[2] for aa in dssp])
