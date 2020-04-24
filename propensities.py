@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 import os, sys, argparse, traceback, urllib2
 from collections import OrderedDict
 import pickle
@@ -101,7 +101,7 @@ residues = OrderedDict({'A': 129, 'P': 159, 'N': 195, 'H': 224,
                         'V': 174, 'Y': 263, 'C': 167, 'K': 236,
                         'I': 197, 'F': 240, 'Q': 225, 'S': 155,
                         'L': 201, 'W': 285, 'E': 223, 'T': 172,
-                        'M': 224, 'R': 274, 'G': 104, 'D': 193})
+                        'M': 224, 'R': 274, 'G': 104, 'D': 193,'X':0})
 
 
 class PropensityManager(object):
@@ -158,6 +158,8 @@ class PropensityManager(object):
             raise e
 
     def save_db(self):
+        if self.args is None:
+            return
         db_path = os.path.join(self.args.workdir, "{0}.db".format(self.args.database))
         if os.path.exists(db_path):
             print("Removing Old and Existing Database")
@@ -198,8 +200,7 @@ class PropensityManager(object):
                 with gzip.open(file, mode='rb') as gzipped:
                     response = gzipped.read()
                     writer.write(response)
-            #TODO: Uncomment this line when you run in production to save space
-            #os.remove(file)
+            os.remove(file)
             return os.path.join(loc, file_name)
         else:
             return file
@@ -278,29 +279,33 @@ class PropensityManager(object):
             self.db["total"] = 1
 
     def process_single_pdb(self, pdb_file):
-        base_name = os.path.basename(pdb_file)
-        name, _ = os.path.splitext(base_name)
-        if self.memory.has_key(name):
+        try:
+            base_name = os.path.basename(pdb_file)
+            name, _ = os.path.splitext(base_name)
+            if self.memory.has_key(name):
+                return
+            print("Processing File : {0}".format(pdb_file))
+            _, sequence, ss, sasa = self.get_secondary_structure_details(name, pdb_file)
+            if len(sequence) != len(ss):
+                return
+            protein = ProteinModel()
+            protein.protein_id = name
+            protein.size = len(sequence)
+            protein.helices = sequence.count('H') + sequence.count('G') + sequence.count('I')
+            protein.sheets = sequence.count('E')
+            protein.loops = sequence.count('-') + sequence.count('T')
+            protein.bends = sequence.count('S') + sequence.count('B')
+            protein.sequence = str(sequence)
+            asa = [1 if a >= self.args.cutoff else 0 for a in sasa]
+            ss = self.get_secondary_pattern(ss)
+            protein.ss = ss
+            protein.pattern = "".join([str(x) for x in asa])
+            self.__insert__(models=[protein])
+            self.process_stats(protein)
+            self.memory[name] = 1
+        except Exception as e:
+            print (e.message)
             return
-        print("Processing File : {0}".format(pdb_file))
-        _ , sequence, ss, sasa = self.get_secondary_structure_details(name,pdb_file)
-        if len(sequence) != len(ss):
-            return
-        protein = ProteinModel()
-        protein.protein_id = name
-        protein.size = len(sequence)
-        protein.helices = sequence.count('H') + sequence.count('G') + sequence.count('I')
-        protein.sheets = sequence.count('E')
-        protein.loops = sequence.count('-') + sequence.count('T')
-        protein.bends = sequence.count('S') + sequence.count('B')
-        protein.sequence = str(sequence)
-        asa = [1 if a >= self.args.cutoff else 0 for a in sasa]
-        ss = self.get_secondary_pattern(ss)
-        protein.ss = ss
-        protein.pattern = "".join([str(x) for x in asa])
-        self.__insert__(models=[protein])
-        self.process_stats(protein)
-        self.memory[name] = 1
 
 
 
