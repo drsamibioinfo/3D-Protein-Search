@@ -249,7 +249,7 @@ class PropensityManager(object):
         for index , res in enumerate(sequence):
             sec_struct = ss[index]
             sasa = pattern[index]
-            key = "Polar" if sasa > 0 else "Hydrophobic"
+            key = "Polar" if int(sasa) > 0 else "Hydrophobic"
             if not self.db.has_key(sec_struct):
                 freqs = [0] * len(residues.keys())
             else:
