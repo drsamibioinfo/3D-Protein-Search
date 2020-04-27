@@ -47,6 +47,7 @@ class ProteinModel(Model):
     sequence = StringField()
     ss = StringField()
     pattern = StringField()
+    enhanced = StringField()
     processdate = DateField(default=date.today())
 
     @classmethod
@@ -235,7 +236,7 @@ class PropensityManager(object):
 
         return "".join(ss_pattern)
 
-    def process_stats(self, protein):
+    def process_stats(self, protein,raw_ss):
         """
         This method calculates frequencies of occurrences for the 20 essential residues in different protein secondary structures (H,S,L,T,B) as well as
         calculates the frequencies of them in hydrophobicity/polarity.
@@ -244,7 +245,7 @@ class PropensityManager(object):
         """
         total_residues = "total_residues"
         sequence = protein.sequence
-        ss = protein.ss
+        ss = raw_ss
         pattern = protein.pattern
         for index , res in enumerate(sequence):
             sec_struct = ss[index]
@@ -309,16 +310,58 @@ class PropensityManager(object):
             protein.bends = sequence.count('S') + sequence.count('B')
             protein.sequence = str(sequence)
             asa = [1 if a >= self.args.cutoff else 0 for a in sasa]
-            ss = self.get_secondary_pattern(ss)
+            processed_ss = self.get_secondary_pattern(ss)
             protein.ss = ss
             protein.pattern = "".join([str(x) for x in asa])
-            #self.__insert__(models=[protein])
-            self.process_stats(protein)
+            enhanced = self.get_enhanced(ss,asa)
+            protein.enhanced = enhanced
+            self.__insert__(models=[protein])
+            self.process_stats(protein,processed_ss)
             self.memory[name] = 1
-	    print("Total Processed Proteins : {0}".format(len(self.memory.keys())))
+            print("Total Processed Proteins : {0}".format(len(self.memory.keys())))
         except Exception as e:
-            print (e.message)
+            print(e.message)
             return
+
+    def get_enhanced(self,ss,pattern):
+        sequence = ""
+        for index , letter in enumerate(ss):
+            sasa = pattern[index]
+            if int(sasa) == 0:
+                if letter == 'H':
+                    sequence +='I'
+                elif letter == 'B':
+                    sequence += 'J'
+                elif letter == 'E':
+                    sequence += 'K'
+                elif letter == 'G':
+                    sequence += 'L'
+                elif letter == 'I':
+                    sequence += 'M'
+                elif letter == 'T':
+                    sequence += 'N'
+                elif letter == 'S':
+                    sequence += 'O'
+                else:
+                    sequence += 'P'
+            else:
+                if letter == 'H':
+                    sequence += 'A'
+                elif letter == 'B':
+                    sequence += 'B'
+                elif letter == 'E':
+                    sequence += 'C'
+                elif letter == 'G':
+                    sequence += 'D'
+                elif letter == 'I':
+                    sequence += 'E'
+                elif letter == 'T':
+                    sequence += 'F'
+                elif letter == 'S':
+                    sequence += 'G'
+                else:
+                    sequence += 'H'
+        return sequence
 
 
 
