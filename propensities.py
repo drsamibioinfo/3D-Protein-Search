@@ -250,6 +250,19 @@ class PropensityManager(object):
             sec_struct = ss[index]
             sasa = pattern[index]
             key = "Polar" if int(sasa) > 0 else "Hydrophobic"
+######################## Calculate Special Solvent Accessible Area and their Total ############################################################################
+            sec_solvent_key = "{0}_{1}".format(sec_struct,key)
+            sec_solvent_total = "{0}_total".format(sec_solvent_key)
+            if not self.db.has_key(sec_solvent_key):
+                sec_solvent_freqs = [0] * len(residues.keys())
+            else:
+                sec_solvent_freqs = self.db[sec_solvent_key]
+            sec_solvent_freqs[residues.keys().index(res)] += 1
+            if self.db.has_key(sec_solvent_total):
+                self.db[sec_solvent_total] += 1
+            else:
+                self.db[sec_solvent_total] = 1
+############################################################################ End of Special Solvent Accessible Area ###########################################
             if not self.db.has_key(sec_struct):
                 freqs = [0] * len(residues.keys())
             else:
@@ -272,7 +285,6 @@ class PropensityManager(object):
                 self.db[total_residues] = 1
             else:
                 self.db[total_residues] += 1
-
         if self.db.has_key("total"):
             self.db["total"] += 1
         else:
@@ -300,9 +312,10 @@ class PropensityManager(object):
             ss = self.get_secondary_pattern(ss)
             protein.ss = ss
             protein.pattern = "".join([str(x) for x in asa])
-            self.__insert__(models=[protein])
+            #self.__insert__(models=[protein])
             self.process_stats(protein)
             self.memory[name] = 1
+	    print("Total Processed Proteins : {0}".format(len(self.memory.keys())))
         except Exception as e:
             print (e.message)
             return
