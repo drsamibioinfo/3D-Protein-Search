@@ -267,7 +267,7 @@ class Patterning(object):
             target_phi = self.get_phi(target_residues[index - 1], target_res)
             source_psi = self.get_psi(source_res,source_residues[index+1])
             target_psi = self.get_psi(target_res,target_residues[index+1])
-            deviation += sqrt(((1 - target_phi / source_phi) ** 2) + (1 - target_psi / source_psi) ** 2)
+            deviation += sqrt((((source_phi - target_phi) / (source_phi + target_phi)) ** 2) + ((source_psi - target_psi) / (source_psi + target_psi)) ** 2)
             total += 1
         if total == 0:
             return 0.0
