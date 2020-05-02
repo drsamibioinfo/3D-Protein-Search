@@ -6,6 +6,7 @@ from datetime import datetime, date
 from terminaltables import AsciiTable
 from Bio.PDB import PDBParser, DSSP, MMCIFParser
 from Bio.PDB.Polypeptide import PPBuilder
+import Bio.PDB
 from Bio.PDB.vectors import calc_dihedral
 from collections import OrderedDict
 from math import sqrt, degrees
@@ -100,7 +101,7 @@ class Patterning(object):
 
     def print_results(self, headers, rows):
         limit = self.args.limit if self.args.limit < len(rows) else len(rows)
-        data = [headers] + [[getattr(row, x) for x in headers] for row in rows[:limit]]
+        data = [headers] + [[getattr(row, x) for x in headers if hasattr(row,x)] for row in rows]
         table = AsciiTable(data)
         table.title = "Possible Matche(s)"
         table.inner_row_border = True
@@ -127,10 +128,11 @@ class Patterning(object):
             headers += ["ngram"]
         for row in self.db.select(query):
             rows.append(row)
-        self.print_results(headers, rows)
+        if len(rows) > 0:
+            self.print_results(headers, rows)
         return rows
 
-    def get_secondary_structure_details(self, name, pdb_file):
+    def get_secondary_structure_details(self, name, pdb_file,aa_only=False):
         parser = PDBParser()
         structure = parser.get_structure(name, pdb_file)
         dssp = DSSP(structure[0], pdb_file, acc_array="Wilke")
@@ -138,7 +140,7 @@ class Patterning(object):
         sasa = [residues[aa[1]] * aa[3] for aa in dssp]
         builder = PPBuilder()
         seq = ""
-        for chain in builder.build_peptides(structure):
+        for chain in builder.build_peptides(structure,aa_only=aa_only):
             seq += chain.get_sequence()
         return name, seq, ss, sasa
 
@@ -201,9 +203,9 @@ class Patterning(object):
         name, _ = os.path.splitext(base_name)
         _, seq, ss, sasa = self.get_secondary_structure_details(name, source_file)
         if self.args.start != -1 and self.args.end != -1:
-            seq = seq[self.args.start-1:self.args.end-1]
-            ss = ss[self.args.start-1:self.args.end-1]
-            sasa = sasa[self.args.start-1:self.args.end-1]
+            seq = seq[self.args.start-1:self.args.end+1]
+            ss = ss[self.args.start-1:self.args.end+1]
+            sasa = sasa[self.args.start-1:self.args.end+1]
         asa = [1 if a >= self.args.cutoff else 0 for a in sasa] if self.args.pattern is None else [int(x) for x in self.args.pattern]
         common_sequence = self.get_enhanced(ss, asa)
         self.common_length = len(common_sequence)
@@ -214,7 +216,57 @@ class Patterning(object):
             return
         print ("Calculating Elenated Score values. Please Wait....")
         deviated_rows = self.calculate_elenated_topology_score(seq, found_rows)
-        self.print_results(headers=["protein_id","pos","deviation"],rows=deviated_rows)
+        self.print_results(headers=["protein_id","pos","chain","chain_pos","deviation","RMSD"],rows=deviated_rows)
+
+    def calculate_elenated_topology_score(self, seq, rows):
+        try:
+            source_structure = self.__get_structure__(self.args.source)
+            source_residues = [res for res in source_structure.get_residues()]
+            for row in rows:
+                position = row.pos
+                target_file = self.get_target_file(row.protein_id)
+                target_structure = self.__get_structure__(target_file)
+                target_residues = [res for res in target_structure.get_residues()]
+                start_offset_residue = target_residues[position]
+                setattr(row,"chain","{0}/{1}".format(start_offset_residue.full_id[1],start_offset_residue.full_id[2]))
+                setattr(row,"chain_pos",start_offset_residue.full_id[3][1])
+                current_deviation = self.__get_elenated_topology(
+                    source_residues[self.args.start-1:self.args.end+1],
+                    target_residues[position - 1:position+len(seq) + 1])
+                setattr(row,"deviation",current_deviation)
+                self.calculate_RMSD(row,aa_only=False)
+
+        except Exception as e:
+            print(e.message)
+            raise e
+
+        finally:
+            return rows
+
+    def calculate_RMSD(self,row,aa_only=False):
+        if self.args.source is None:
+            setattr(row,"RMSD",-1)
+        source_structure = self.__get_structure__(self.args.source)
+        builder = PPBuilder()
+        type1 = builder.build_peptides(source_structure,aa_only=aa_only)
+        length1 = type1[-1][-1].get_full_id()[3][1]
+        fixed = [atom['CA'] for atom in type1[0]]
+        builder = PPBuilder()
+        position = row.pos
+        target_file = self.get_target_file(row.protein_id)
+        target_structure = self.__get_structure__(target_file)
+        type2 = builder.build_peptides(target_structure, aa_only=aa_only)
+        length2 = type2[-1][-1].get_full_id()[3][1]
+        moving = [atom['CA'] for atom in type2[0]]
+        lengths = [length1, length2]
+        smallest = min(int(item) for item in lengths)
+        # find RMSD
+        sup = Bio.PDB.Superimposer()
+        sup.set_atoms(fixed[:smallest], moving[:smallest])
+        sup.apply(target_structure[0].get_atoms())
+        RMSD = round(sup.rms, 4)
+        setattr(row, "RMSD", RMSD)
+
 
 
     def __get_structure__(self, file_path):
@@ -245,6 +297,31 @@ class Patterning(object):
             print("Downloaded.")
             return output_file
 
+
+
+    def get_phi(self, previous, source_res):
+       try:
+           C_1 = previous['C'].get_vector()
+           N = source_res['N'].get_vector()
+           CA = source_res['CA'].get_vector()
+           C = source_res['C'].get_vector()
+           return degrees(calc_dihedral(C_1, N, CA, C))
+       except Exception as e:
+           return 0.0
+
+    def get_psi(self, target_res,next_res):
+       try:
+           N = target_res['N'].get_vector()
+           CA = target_res['CA'].get_vector()
+           C = target_res['C'].get_vector()
+           N1_1 = next_res['N'].get_vector()
+           return degrees(calc_dihedral(N, CA, C, N1_1))
+       except Exception as e:
+           return 0.0
+
+
+
+
     def __get_elenated_topology(self, source_residues, target_residues):
         """
         This method will calculate the elenated topology mean square deviation
@@ -267,46 +344,13 @@ class Patterning(object):
             target_phi = self.get_phi(target_residues[index - 1], target_res)
             source_psi = self.get_psi(source_res,source_residues[index+1])
             target_psi = self.get_psi(target_res,target_residues[index+1])
-            deviation += sqrt((((source_phi - target_phi) / (source_phi + target_phi)) ** 2) + ((source_psi - target_psi) / (source_psi + target_psi)) ** 2)
+            deviation += sqrt((((source_phi - target_phi) / abs(source_phi + target_phi)) ** 2) + ((source_psi - target_psi) / abs(source_psi + target_psi)) ** 2)
             total += 1
         if total == 0:
             return 0.0
         else:
-            return deviation / float(total)
 
-    def get_phi(self, previous, source_res):
-        C_1 = previous['C'].get_vector()
-        N = source_res['N'].get_vector()
-        CA = source_res['CA'].get_vector()
-        C = source_res['C'].get_vector()
-        return degrees(calc_dihedral(C_1,N,CA,C))
-
-    def get_psi(self, target_res,next_res):
-        N = target_res['N'].get_vector()
-        CA = target_res['CA'].get_vector()
-        C = target_res['C'].get_vector()
-        N1_1 = next_res['N'].get_vector()
-        return degrees(calc_dihedral(N,CA,C,N1_1))
-
-    def calculate_elenated_topology_score(self, seq, rows):
-        try:
-            source_structure = self.__get_structure__(self.args.source)
-            source_residues = [res for res in source_structure.get_residues()]
-            for row in rows:
-                position = row.pos
-                target_file = self.get_target_file(row.protein_id)
-                target_structure = self.__get_structure__(target_file)
-                target_residues = [res for res in target_structure.get_residues()]
-                current_deviation = self.__get_elenated_topology(
-                    source_residues,
-                    target_residues[position - 1:position+len(seq) + 1])
-                setattr(row,"deviation",current_deviation)
-
-            return rows
-
-        except Exception as e:
-            print(e.message)
-            return rows, "N/A"
+            return deviation / (float(total) * 100.0)
 
     def process_patterning(self):
         ss = self.args.structure
