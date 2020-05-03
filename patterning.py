@@ -9,7 +9,7 @@ from Bio.PDB.Polypeptide import PPBuilder
 import Bio.PDB
 from Bio.PDB.vectors import calc_dihedral
 from collections import OrderedDict
-from math import sqrt, degrees
+from math import sqrt, degrees , atan2 , sin,cos
 
 # borrowed from SARI Sabban <http://www.github.com/sarisabban>
 # These numbers represent different residues molecular weights
@@ -232,7 +232,7 @@ class Patterning(object):
                 setattr(row,"chain_pos",start_offset_residue.full_id[3][1])
                 current_deviation = self.__get_elenated_topology(
                     source_residues[self.args.start-1:self.args.end+1],
-                    target_residues[position - 1:position+len(seq) + 1])
+                    target_residues[position-1:position+len(seq)+1],len(seq))
                 setattr(row,"deviation",current_deviation)
                 self.calculate_RMSD(row,self.args.start,self.args.end-self.args.start,aa_only=False)
 
@@ -334,7 +334,7 @@ class Patterning(object):
 
 
 
-    def __get_elenated_topology(self, source_residues, target_residues):
+    def __get_elenated_topology(self, source_residues, target_residues,seq_length):
         """
         This method will calculate the elenated topology mean square deviation
         :param source_residues: Fragment source residues
@@ -356,13 +356,13 @@ class Patterning(object):
             target_phi = self.get_phi(target_residues[index - 1], target_res)
             source_psi = self.get_psi(source_res,source_residues[index+1])
             target_psi = self.get_psi(target_res,target_residues[index+1])
-            deviation += sqrt((((source_phi - target_phi) / abs(source_phi + target_phi)) ** 2) + ((source_psi - target_psi) / abs(source_psi + target_psi)) ** 2)
+            deviation += atan2(sin(source_phi-target_phi),cos(source_phi-target_phi)) + atan2(sin(source_psi-target_psi),cos(source_psi-target_psi))
             total += 1
         if total == 0:
             return 0.0
         else:
 
-            return deviation / (float(total) * 100.0)
+            return (abs(deviation)/float(seq_length))*100.0
 
     def process_patterning(self):
         ss = self.args.structure
