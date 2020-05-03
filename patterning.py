@@ -216,7 +216,7 @@ class Patterning(object):
             return
         print ("Calculating Elenated Score values. Please Wait....")
         deviated_rows = self.calculate_elenated_topology_score(seq, found_rows)
-        self.print_results(headers=["protein_id","pos","chain","chain_pos","deviation","RMSD"],rows=deviated_rows)
+        self.print_results(headers=["protein_id","pos","chain","chain_pos","deviation","rmsd"],rows=deviated_rows)
 
     def calculate_elenated_topology_score(self, seq, rows):
         try:
@@ -234,7 +234,7 @@ class Patterning(object):
                     source_residues[self.args.start-1:self.args.end+1],
                     target_residues[position - 1:position+len(seq) + 1])
                 setattr(row,"deviation",current_deviation)
-                self.calculate_RMSD(row,aa_only=False)
+                self.calculate_RMSD(row,self.args.start,self.args.end-self.args.start,aa_only=False)
 
         except Exception as e:
             print(e.message)
@@ -243,29 +243,41 @@ class Patterning(object):
         finally:
             return rows
 
-    def calculate_RMSD(self,row,aa_only=False):
+    def calculate_RMSD(self,row,source_position,fragment_length,aa_only=False):
         if self.args.source is None:
-            setattr(row,"RMSD",-1)
+            setattr(row, "rmsd", -1)
+        target_position = row.pos
         source_structure = self.__get_structure__(self.args.source)
         builder = PPBuilder()
-        type1 = builder.build_peptides(source_structure,aa_only=aa_only)
+        type1 = builder.build_peptides(source_structure, aa_only=aa_only)
         length1 = type1[-1][-1].get_full_id()[3][1]
-        fixed = [atom['CA'] for atom in type1[0]]
+        fixed_residues = []
+        for pp in type1:
+            fixed_residues += [x for x in pp]
+        fixed = [atom['CA'] for atom in fixed_residues][source_position:source_position + fragment_length]
         builder = PPBuilder()
-        position = row.pos
         target_file = self.get_target_file(row.protein_id)
+        if target_file is None:
+            setattr(row, "rmsd", -1)
+            return
         target_structure = self.__get_structure__(target_file)
         type2 = builder.build_peptides(target_structure, aa_only=aa_only)
         length2 = type2[-1][-1].get_full_id()[3][1]
-        moving = [atom['CA'] for atom in type2[0]]
+        moving_residues = []
+        for pp in type2:
+            moving_residues += [x for x in pp]
+        moving = [atom['CA'] for atom in moving_residues][target_position:target_position + fragment_length]
         lengths = [length1, length2]
         smallest = min(int(item) for item in lengths)
         # find RMSD
+        if len(fixed) != len(moving):
+            setattr(row, "rmsd", -1)
+            return
         sup = Bio.PDB.Superimposer()
-        sup.set_atoms(fixed[:smallest], moving[:smallest])
+        sup.set_atoms(fixed, moving)
         sup.apply(target_structure[0].get_atoms())
         RMSD = round(sup.rms, 4)
-        setattr(row, "RMSD", RMSD)
+        setattr(row, "rmsd", RMSD)
 
 
 
