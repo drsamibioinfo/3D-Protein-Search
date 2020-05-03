@@ -11,6 +11,7 @@ from Bio.PDB.vectors import calc_dihedral
 from collections import OrderedDict
 from math import sqrt, degrees
 import math
+from collections import Counter
 
 # borrowed from SARI Sabban <http://www.github.com/sarisabban>
 # These numbers represent different residues molecular weights
@@ -100,6 +101,98 @@ class Designer(object):
         print("Predicting Sequence. Please Wait....")
         self.predict_sequence(protein_name,seq,ss,sasa)
 
+    # def predict_sequence_offset(self,protein_name,seq,ss,sasa):
+    #     pointer = 0
+    #     window = self.args.window if self.args.window > 0 else 8
+    #     seq_length = len(seq)
+    #     iterations = []
+    #     while seq_length - pointer > 0:
+    #         if seq_length - pointer < window:
+    #             window = seq_length - pointer
+    #         current_ss = ss[pointer:pointer + window]
+    #         current_sasa = sasa[pointer:pointer + window]
+    #         current_seq = seq[pointer:pointer + window]
+    #         pointer += 1
+    #         current_asa = [1 if a >= self.args.cutoff else 0 for a in current_sasa]
+    #         common_sequence = self.get_enhanced(current_ss, current_asa)
+    #         found_proteins = self.search_by_common_pattern(common_sequence)
+    #         if len(found_proteins) <= 0:
+    #             continue
+    #         if self.args.fuzzy:
+    #             continue
+    #
+    #         for row in found_proteins:
+    #             self.calculate_RMSD(row, pointer, window, aa_only=False)
+    #         sorted_proteins = sorted([x for x in found_proteins if x.rmsd > -1], key=lambda protein: protein.rmsd,
+    #                                  reverse=False)
+    #         if len(sorted_proteins) < 1:
+    #             continue
+    #         best_protein = sorted_proteins[0]
+    #         if best_protein.protein_id == protein_name and len(found_proteins) > 1:
+    #             best_protein = sorted_proteins[1]
+    #         pos = best_protein.pos
+    #         current_sequence = best_protein.sequence[pos:pos + len(current_seq) + 1]
+    #         if len(current_sequence) < self.args.window:
+    #             current_sequence += "".join(["-"]*(self.args.window-len(current_sequence)))
+    #         iterations.append(current_sequence)
+    #     for row in range(0,len(iterations)):
+    #         letters = []
+    #         for col in range(0,self.args.window):
+    #             letters.append(iterations[row][col])
+    #         freqs = Counter(letters)
+    #         sorted_letters= sorted(freqs.items(),key=lambda item:item[1],reverse=True)
+    #         if len(sorted_letters) > 0:
+    #             self.predicted_sequence += sorted_letters[0][0]
+    #     print("Sequence Prediction Finished.")
+    #     print("Predicted Sequence:")
+    #     print(self.predicted_sequence)
+    #
+    # def get_unique_ss_island(self,ss):
+    #     current = ss[0]
+    #     island = current
+    #     island_positions = [0]
+    #     for index in range(1,len(ss)):
+    #         if ss[index] == current:
+    #             island += ss[index]
+    #             island_positions.append(index)
+    #         else:
+    #             yield island , island_positions
+    #             current = ss[index]
+    #             island = current
+    #             island_positions = [index]
+    #     if len(island) > 0 and len(island_positions) > 0:
+    #         yield island,island_positions
+    #
+    # def predict_sequence2(self,protein_name,seq,ss,sasa):
+    #     for island, positions in self.get_unique_ss_island(ss):
+    #         current_ss = island
+    #         current_sasa = [sasa[x] for x in positions]
+    #         current_seq = "".join([seq[x] for x in positions])
+    #         current_asa = [1 if a >= self.args.cutoff else 0 for a in current_sasa]
+    #         common_sequence = self.get_enhanced(current_ss, current_asa)
+    #         found_proteins = self.search_by_common_pattern(common_sequence)
+    #         if len(found_proteins) <= 0:
+    #             continue
+    #         if self.args.fuzzy:
+    #             continue
+    #         pointer = positions[0]
+    #         window = positions[-1] - pointer
+    #         for row in found_proteins:
+    #             self.calculate_RMSD(row, pointer, window, aa_only=False)
+    #         sorted_proteins = sorted([x for x in found_proteins if x.rmsd > -1], key=lambda protein: protein.rmsd,
+    #                                  reverse=False)
+    #         if len(sorted_proteins) < 1:
+    #             continue
+    #         best_protein = sorted_proteins[0]
+    #         if best_protein.protein_id == protein_name and len(found_proteins) > 1:
+    #             best_protein = sorted_proteins[1]
+    #         pos = best_protein.pos
+    #         self.predicted_sequence += best_protein.sequence[pos:pos + len(current_seq) + 1]
+    #     print("Sequence Prediction Finished.")
+    #     print("Predicted Sequence:")
+    #     print(self.predicted_sequence)
+
+
     def predict_sequence(self,protein_name,seq,ss,sasa):
         pointer = 0
         window = self.args.window if self.args.window > 0 else 8
@@ -121,7 +214,7 @@ class Designer(object):
 
             for row in found_proteins:
                 self.calculate_RMSD(row,pointer,window,aa_only=False)
-            sorted_proteins = sorted([x for x in found_proteins if x.rmsd > -1],key=lambda protein: protein.rmsd,reverse=True)
+            sorted_proteins = sorted([x for x in found_proteins if x.rmsd > -1],key=lambda protein: protein.rmsd,reverse=False)
             if len(sorted_proteins) < 1:
                 continue
             best_protein = sorted_proteins[0]
@@ -148,26 +241,25 @@ class Designer(object):
         return parser.get_structure(name, file_path)
 
     def get_target_file(self, protein_id):
-        try:
-            if not self.args.pdbs is None:
-                which_file = os.path.join(self.args.pdbs, protein_id)
-                if os.path.exists(which_file + ".pdb"):
-                    return which_file + ".pdb"
-                elif os.path.exists(which_file + ".cif"):
-                    return which_file + ".cif"
-                else:
-                    return which_file + ".pdb"
+        if not self.args.pdbs is None:
+            which_file = os.path.join(self.args.pdbs, protein_id)
+            if os.path.exists(which_file + ".pdb"):
+                return which_file + ".pdb"
+            elif os.path.exists(which_file + ".cif"):
+                return which_file + ".cif"
             else:
-                print("Downloading File : {0}".format(protein_id))
-                download_url = "https://files.rcsb.org/download/{0}.pdb".format(protein_id)
-                response = urllib2.urlopen(download_url)
-                output_file = os.path.join(self.args.workdir, "{0}.pdb".format(protein_id))
-                with open(output_file, mode='w') as output:
-                    output.write(response.read())
-                print("Downloaded.")
-                return output_file
-        except Exception as e:
-            return None
+                return which_file + ".pdb"
+        elif os.path.exists(os.path.join(self.args.workdir, "{0}.pdb".format(protein_id))):
+            return os.path.join(self.args.workdir, "{0}.pdb".format(protein_id))
+        else:
+            print("Downloading File : {0}".format(protein_id))
+            download_url = "https://files.rcsb.org/download/{0}.pdb".format(protein_id)
+            response = urllib2.urlopen(download_url)
+            output_file = os.path.join(self.args.workdir, "{0}.pdb".format(protein_id))
+            with open(output_file, mode='w') as output:
+                output.write(response.read())
+            print("Downloaded.")
+            return output_file
 
 
     def get_phi(self, previous, source_res):
@@ -221,40 +313,44 @@ class Designer(object):
             return deviation / (float(total) * 100.0)
 
     def calculate_RMSD(self,row,source_position,fragment_length,aa_only=False):
-        if self.args.model is None:
-            setattr(row,"rmsd",-1)
-        target_position = row.pos
-        source_structure = self.__get_structure__(self.args.model)
-        builder = PPBuilder()
-        type1 = builder.build_peptides(source_structure,aa_only=aa_only)
-        length1 = type1[-1][-1].get_full_id()[3][1]
-        fixed_residues = []
-        for pp in type1:
-            fixed_residues += [x for x in pp]
-        fixed = [atom['CA'] for atom in fixed_residues][source_position:source_position+fragment_length]
-        builder = PPBuilder()
-        target_file = self.get_target_file(row.protein_id)
-        if target_file is None:
-            setattr(row,"rmsd",-1)
-            return
-        target_structure = self.__get_structure__(target_file)
-        type2 = builder.build_peptides(target_structure, aa_only=aa_only)
-        length2 = type2[-1][-1].get_full_id()[3][1]
-        moving_residues = []
-        for pp in type2:
-            moving_residues += [x for x in pp]
-        moving = [atom['CA'] for atom in moving_residues][target_position:target_position+fragment_length]
-        lengths = [length1, length2]
-        smallest = min(int(item) for item in lengths)
-        # find RMSD
-        if len(fixed) != len(moving):
-            setattr(row,"rmsd",-1)
-            return
-        sup = Bio.PDB.Superimposer()
-        sup.set_atoms(fixed, moving)
-        sup.apply(target_structure[0].get_atoms())
-        RMSD = round(sup.rms, 4)
-        setattr(row, "rmsd", RMSD)
+        try:
+            if self.args.model is None:
+                setattr(row, "rmsd", -1)
+            target_position = row.pos
+            source_structure = self.__get_structure__(self.args.model)
+            builder = PPBuilder()
+            type1 = builder.build_peptides(source_structure, aa_only=aa_only)
+            length1 = type1[-1][-1].get_full_id()[3][1]
+            fixed_residues = []
+            for pp in type1:
+                fixed_residues += [x for x in pp]
+            fixed = [atom['CA'] for atom in fixed_residues][source_position:source_position + fragment_length]
+            builder = PPBuilder()
+            target_file = self.get_target_file(row.protein_id)
+            if target_file is None:
+                setattr(row, "rmsd", -1)
+                return
+            target_structure = self.__get_structure__(target_file)
+            type2 = builder.build_peptides(target_structure, aa_only=aa_only)
+            length2 = type2[-1][-1].get_full_id()[3][1]
+            moving_residues = []
+            for pp in type2:
+                moving_residues += [x for x in pp]
+            moving = [atom['CA'] for atom in moving_residues][target_position:target_position + fragment_length]
+            lengths = [length1, length2]
+            smallest = min(int(item) for item in lengths)
+            # find RMSD
+            if len(fixed) != len(moving):
+                setattr(row, "rmsd", -1)
+                return
+            sup = Bio.PDB.Superimposer()
+            sup.set_atoms(fixed, moving)
+            sup.apply(target_structure[0].get_atoms())
+            RMSD = round(sup.rms, 4)
+            setattr(row, "rmsd", RMSD)
+        except Exception as e:
+            print(e.message)
+            setattr(row, "rmsd", -1)
 
     def get_enhanced(self, ss, pattern):
         sequence = ""

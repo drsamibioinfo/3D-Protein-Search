@@ -216,6 +216,7 @@ class Patterning(object):
             return
         print ("Calculating Elenated Score values. Please Wait....")
         deviated_rows = self.calculate_elenated_topology_score(seq, found_rows)
+        deviated_rows = sorted([x for x in deviated_rows if x.rmsd > -1],key=lambda x : x.rmsd,reverse=False)
         self.print_results(headers=["protein_id","pos","chain","chain_pos","deviation","rmsd"],rows=deviated_rows)
 
     def calculate_elenated_topology_score(self, seq, rows):
@@ -299,6 +300,8 @@ class Patterning(object):
                 return which_file + ".cif"
             else:
                 return which_file + ".pdb"
+        elif os.path.exists(os.path.join(self.args.workdir,"{0}.pdb".format(protein_id))):
+            return os.path.join(self.args.workdir,"{0}.pdb".format(protein_id))
         else:
             print("Downloading File : {0}".format(protein_id))
             download_url = "https://files.rcsb.org/download/{0}.pdb".format(protein_id)
