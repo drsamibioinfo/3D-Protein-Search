@@ -248,11 +248,11 @@ class Patterning(object):
 
     def get_chain_length(self,target_structure,chain_name):
         length = 0
-        for model in target_structure.get_models():
-            for chain in model.get_chains():
-                if chain.id == chain_name:
-                    length = len(chain)
-                    break
+        model = target_structure.get_models()[0]
+        for chain in model.get_chains():
+            if chain.id == chain_name:
+                length = len(chain)
+                break
         return length
 
 
