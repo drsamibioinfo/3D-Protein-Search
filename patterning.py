@@ -217,7 +217,7 @@ class Patterning(object):
         print ("Calculating Elenated Score values. Please Wait....")
         deviated_rows = self.calculate_elenated_topology_score(seq, found_rows)
         deviated_rows = sorted([x for x in deviated_rows if x.rmsd > -1],key=lambda x : x.rmsd,reverse=False)
-        self.print_results(headers=["protein_id","pos","chain","chain_pos","deviation","rmsd"],rows=deviated_rows)
+        self.print_results(headers=["protein_id","pos","chain","chain_pos","chain_length","deviation","rmsd"],rows=deviated_rows)
 
     def calculate_elenated_topology_score(self, seq, rows):
         try:
@@ -230,6 +230,8 @@ class Patterning(object):
                 target_residues = [res for res in target_structure.get_residues()]
                 start_offset_residue = target_residues[position]
                 setattr(row,"chain","{0}/{1}".format(start_offset_residue.full_id[1],start_offset_residue.full_id[2]))
+                chain_length = self.get_chain_length(target_structure,start_offset_residue.full_id[1])
+                setattr(row,"chain_length",chain_length)
                 setattr(row,"chain_pos",start_offset_residue.full_id[3][1])
                 current_deviation = self.__get_elenated_topology(
                     source_residues[self.args.start-1:self.args.end+1],
@@ -243,6 +245,16 @@ class Patterning(object):
 
         finally:
             return rows
+
+    def get_chain_length(self,target_structure,chain_name):
+        length = 0
+        for model in target_structure.get_models():
+            for chain in model.get_chains():
+                if chain.id == chain_name:
+                    length = len(chain)
+                    break
+        return length
+
 
     def calculate_RMSD(self,row,source_position,fragment_length,aa_only=False):
         if self.args.source is None:
