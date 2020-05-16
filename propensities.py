@@ -259,6 +259,7 @@ class PropensityManager(object):
             else:
                 sec_solvent_freqs = self.db[sec_solvent_key]
             sec_solvent_freqs[residues.keys().index(res)] += 1
+            self.db[sec_solvent_key] = sec_solvent_freqs
             if self.db.has_key(sec_solvent_total):
                 self.db[sec_solvent_total] += 1
             else:
@@ -315,7 +316,7 @@ class PropensityManager(object):
             protein.pattern = "".join([str(x) for x in asa])
             enhanced = self.get_enhanced(ss,asa)
             protein.enhanced = enhanced
-            self.__insert__(models=[protein])
+            #self.__insert__(models=[protein])
             self.process_stats(protein,processed_ss)
             self.memory[name] = 1
             print("Total Processed Proteins : {0}".format(len(self.memory.keys())))

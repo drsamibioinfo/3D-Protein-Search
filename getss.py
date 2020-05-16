@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 from Bio.PDB import PDBParser , DSSP
 import os,urllib2,sys
 from Bio.PDB.Polypeptide import PPBuilder
@@ -7,9 +7,12 @@ if len(sys.argv) <= 1:
     print("You have to supply the name of the PDB")
 else:
     param = sys.argv[1]
+    where = sys.argv[2]
+    if not where:
+        where = os.curdir
     download_url = "https://files.rcsb.org/download/{0}.pdb".format(param)
     response = urllib2.urlopen(download_url)
-    output_file = os.path.join(os.curdir,"{0}.pdb".format(param))
+    output_file = os.path.join(where,"{0}.pdb".format(param))
     with open(output_file,mode='w') as output:
         output.write(response.read())
     print("{0} was downloaded successfully".format(param))
