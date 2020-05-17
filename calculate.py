@@ -24,7 +24,6 @@ for i in range(len(residues.keys())):
 props = {}
 for ss, pp in ss_props.items():
     props[ss] = [x / y for x, y in zip(pp[:-1], fi_props[:-1])]
-
 ############################################### Calculate Propensities######################################################################################
 output = open('ss_propensities.csv', 'w')
 output.write(",".join(["class"] + residues.keys()[:-1]) + "\r")
@@ -47,5 +46,42 @@ hydrophobicity = [x / float(stats['total_residues']) for x in stats['Hydrophobic
 output.write(",".join(["Polar"] + [str(x) for x in polarity]) + "\r")
 output.write(",".join(["Hydrophobicity"] + [str(x) for x in hydrophobicity]) + "\r")
 output.close()
+
+############################################################# Calculate Propensities for SASA (Hydrophobicity/Polarity) ###################################
+
+SASA = ['Hydrophobic','Polar']
+sasa_types = []
+for type in SASA:
+    for ss in secondary_structures:
+        sasa_types.append((ss,type))
+
+residues_sasa_propensities = {}
+residues_sasa_probabilities = {}
+
+for ss,type in sasa_types:
+    propss = [0] * (len(residues.keys()) - 1)
+    probabilis = [0] * (len(residues.keys()) - 1)
+    attr = "{0}_{1}".format(ss,type)
+    for i in range(0,len(residues.keys())-1):
+        residue_props = (stats[attr][i] / float(stats[type][i])) / (float(sum(stats[attr]))/float(sum(stats[type])))
+        residue_probabilities = stats[attr][i] / float(stats[ss][i])
+        propss[i] = residue_props
+        probabilis[i] = residue_probabilities
+    residues_sasa_propensities[attr] = propss
+    residues_sasa_probabilities[attr] = probabilis
+
+output = open('ss_sasa_propensities.csv','w')
+headers = ['Type'] + residues.keys()
+output.write(",".join(headers) + "\r")
+for k , v in residues_sasa_propensities.items():
+    output.write(",".join([k] + [str(x) for x in v])+"\r")
+output.close()
+output = open('ss_sasa_probabilities.csv','w')
+output.write(",".join(headers) + "\r")
+for k , v in residues_sasa_probabilities.items():
+    output.write(",".join([k] + [str(x) for x in v])+"\r")
+output.close()
+print("Secondary Structures propensities in different SASA has been written.")
+
 
 print("Statistics has been written.")
