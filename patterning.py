@@ -378,7 +378,7 @@ class Patterning(object):
             source_residues += [x for x in pp]
         #source_backbones = [atom['CA'] for atom in source_residues[source_position:source_position + fragment_length+1]]
         source_chain_name , source_chain , source_position_in_chain = self.get_chain_polypeptide(source_structure,source_pps,source_position)
-        source_backbones = [atom['CA'] for atom in source_chain[source_position_in_chain:source_position_in_chain+fragment_length]]
+        source_backbones = [atom['CA'] for atom in source_chain[source_position_in_chain-1:source_position_in_chain+fragment_length]]
         builder = PPBuilder()
         target_file = self.get_target_file(row.protein_id)
         if target_file is None:
@@ -392,7 +392,7 @@ class Patterning(object):
             target_residues += [x for x in pp]
         #target_backbone = [atom['CA'] for atom in target_residues[target_position:target_position + fragment_length+1]]
         target_chain_name , target_chain , target_position_in_chain = self.get_chain_polypeptide(target_structure,target_pps,target_position)
-        target_backbone = [atom['CA'] for atom in target_chain[target_position_in_chain:target_position_in_chain+fragment_length]]
+        target_backbone = [atom['CA'] for atom in target_chain[target_position_in_chain-1:target_position_in_chain+fragment_length]]
         lengths = [source_length,target_length]
         smallest = min(int(item) for item in lengths)
         # find RMSD
@@ -401,7 +401,7 @@ class Patterning(object):
             return
         sup = Bio.PDB.Superimposer()
         sup.set_atoms(source_backbones, target_backbone)
-        sup.apply(target_structure.get_atoms())
+        sup.apply(source_structure.get_atoms())
         RMSD = round(sup.rms, 4)
         setattr(row, "rmsd", RMSD)
 
