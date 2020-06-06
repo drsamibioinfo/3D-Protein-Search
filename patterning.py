@@ -353,6 +353,7 @@ class Patterning(object):
             source_structure = self.__get_structure__(self.args.source)
             source_residues = [res for res in source_structure.get_residues()]
             for row in rows:
+                setattr(row,"protein_id",str(row.protein_id).upper())
                 position = row.pos
                 try:
                     target_file = self.get_target_file(row.protein_id)
