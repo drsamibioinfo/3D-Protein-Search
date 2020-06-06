@@ -161,6 +161,10 @@ class Patterning(object):
                                                                                  "higher value than the following "
                                                                                  "fuzziness level .Defaults to 0.90")
         self.p.add_argument("-v","--distance",type=int,default=1,help="Possible Lovenstein distance for fuzzy string search")
+        self.p.add_argument("-j","--deletions",type=int,default=0,help="Number of allowed string deletions when fuzzy string search is enabled. Defaults to Zero.")
+        self.p.add_argument("-n","--insertions",type=int,default=0,help="Number of allowed string insertions when fuzzy string search is enabled. Defaults to Zero.")
+        self.p.add_argument("-k","--substitutions",type=int,default=0,help="Number of allowed string substitutions when fuzzy string search is enabled. Defaults to Zero.")
+
 
         if len(sys.argv) <= 1:
             self.p.print_help()
@@ -312,7 +316,8 @@ class Patterning(object):
             new_matches = []
             deleting = []
             for row in found_rows:
-                matches = find_near_matches(common_sequence,row.enhanced,max_l_dist=self.args.distance)
+                matches = find_near_matches(common_sequence,row.enhanced,max_l_dist=self.args.distance,max_deletions=self.args.deletions,max_insertions=self.args.insertions,
+                                            max_substitutions=self.args.substitutions)
                 if len(matches) > 0:
                     repeats = 1
                     for match in matches:
