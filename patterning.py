@@ -10,6 +10,7 @@ import Bio.PDB
 from Bio.PDB.vectors import calc_dihedral
 from collections import OrderedDict
 from math import sqrt, degrees, atan2, sin, cos
+from fuzzysearch import find_near_matches
 
 # borrowed from SARI Sabban <http://www.github.com/sarisabban>
 # These numbers represent different residues molecular weights
@@ -67,7 +68,6 @@ def get_sequence_position(structure, chain_id, start_position, end_position):
         return seq_leftover + start
 
 
-
 def get_chain_position(structure, global_index):
     chain = None
     position_in_chain = -1
@@ -88,7 +88,8 @@ def get_chain_position(structure, global_index):
             position_in_chain = global_index - (distance - len(pp))
             chain = pp.chain_id
             break
-    return chain , position_in_chain
+    return chain, position_in_chain
+
 
 class ProteinModel(Model):
     protein_id = StringField()
@@ -159,6 +160,7 @@ class Patterning(object):
         self.p.add_argument("-z", "--fuzzylevel", type=float, default=0.90, help="Include only results with equal or "
                                                                                  "higher value than the following "
                                                                                  "fuzziness level .Defaults to 0.90")
+        self.p.add_argument("-v","--distance",type=int,default=1,help="Possible Lovenstein distance for fuzzy string search")
 
         if len(sys.argv) <= 1:
             self.p.print_help()
@@ -190,7 +192,7 @@ class Patterning(object):
         if self.args.fuzzy:
             query = "select p.* , ngramSearch(enhanced,'{0}') as ngram from proteins as p where ngram > {2} order by ngram DESC limit {3}".format(
                 pattern, pattern, self.args.fuzzylevel, self.args.limit
-                )
+            )
         else:
             query = "select p.* , position(enhanced,'{0}') as pos from proteins as p where position(enhanced,'{1}') > 0 limit {2}".format(
                 pattern, pattern, self.args.limit)
@@ -201,10 +203,11 @@ class Patterning(object):
         else:
             headers += ["ngram"]
         for row in self.db.select(query):
+
             rows.append(row)
-        if len(rows) > 0:
-            self.print_results(headers, rows)
-        return rows
+        # if len(rows) > 0:
+        #     self.print_results(headers, rows)
+        return rows , headers
 
     def get_secondary_structure_details(self, name, pdb_file, aa_only=False):
         parser = PDBParser()
@@ -287,30 +290,60 @@ class Patterning(object):
             end = self.args.end
             fragment_length = end - start
             chain_id = self.args.chain
-            seq_start = get_sequence_position(structure,chain_id,start,end)
+            seq_start = get_sequence_position(structure, chain_id, start, end)
             if seq_start == -1:
-                self.p.error("Unable to get the sequence position from the chain identifier , start position and end position")
+                self.p.error(
+                    "Unable to get the sequence position from the chain identifier , start position and end position")
                 self.p.print_help()
                 return
-            seq = seq[seq_start:seq_start + fragment_length+1]
-            ss = ss[seq_start:seq_start + fragment_length+1]
-            sasa = sasa[seq_start:seq_start + fragment_length+1]
+            seq = seq[seq_start:seq_start + fragment_length + 1]
+            ss = ss[seq_start:seq_start + fragment_length + 1]
+            sasa = sasa[seq_start:seq_start + fragment_length + 1]
         asa = [1 if a >= self.args.cutoff else 0 for a in sasa] if self.args.pattern is None else [int(x) for x in
                                                                                                    self.args.pattern]
         common_sequence = self.get_enhanced(ss, asa)
         self.common_length = len(common_sequence)
-        found_rows = self.search_by_common_pattern(common_sequence)
+        found_rows , incoming_headers = self.search_by_common_pattern(common_sequence)
+        incoming_headers_set = set(incoming_headers)
         if len(found_rows) <= 0:
+            print("No Records found.")
             return
-        if self.args.fuzzy:
-            return
+        if self.args.fuzzy and len(found_rows) > 0:
+            new_matches = []
+            deleting = []
+            for row in found_rows:
+                matches = find_near_matches(common_sequence,row.enhanced,max_l_dist=self.args.distance)
+                if len(matches) > 0:
+                    repeats = 1
+                    for match in matches:
+                        if repeats <= 1:
+                            setattr(row, "pos", match.start)
+                            setattr(row, "end_pos", match.end)
+                        else:
+                            keys = row.to_dict()
+                            ngram = keys['ngram']
+                            del keys['ngram']
+                            new_model = ProteinModel(**keys)
+                            setattr(new_model, "pos", match.start)
+                            setattr(new_model, "end_pos", match.end)
+                            setattr(new_model,"ngram",ngram)
+                            new_matches.append(new_model)
+                        repeats += 1
+                else:
+                    deleting.append(row)
+            found_rows.extend(new_matches)
+            for todelete in deleting:
+                found_rows.remove(todelete)
         print ("Calculating Elenated Score values. Please Wait....")
-        deviated_rows = self.calculate_elenated_topology_score(seq, found_rows,seq_start,fragment_length)
+        deviated_rows = self.calculate_elenated_topology_score(seq, found_rows, seq_start, fragment_length)
         deviated_rows = sorted([x for x in deviated_rows if x.rmsd > -1], key=lambda x: x.rmsd, reverse=False)
-        self.print_results(headers=["protein_id", "pos", "chain", "chain_pos", "chain_length", "deviation", "rmsd"],
+        proper_headers_set = ["protein_id", "pos", "chain", "chain_pos","end_pos", "chain_length", "deviation", "rmsd"]
+        if self.args.fuzzy:
+            proper_headers_set += ['ngram']
+        self.print_results(headers=proper_headers_set,
                            rows=deviated_rows)
 
-    def calculate_elenated_topology_score(self, seq, rows,seq_start,fragment_length):
+    def calculate_elenated_topology_score(self, seq, rows, seq_start, fragment_length):
         try:
             source_structure = self.__get_structure__(self.args.source)
             source_residues = [res for res in source_structure.get_residues()]
@@ -319,23 +352,24 @@ class Patterning(object):
                 try:
                     target_file = self.get_target_file(row.protein_id)
                 except Exception as e:
-                    setattr(row,'rmsd',-1)
-                    setattr(row,'chain_length',-1)
-                    setattr(row,'chain_pos',-1)
-                    setattr(row,'deviation',-1)
-                    setattr(row,'chain',"N/A")
+                    setattr(row, 'rmsd', -1)
+                    setattr(row, 'chain_length', -1)
+                    setattr(row, 'chain_pos', -1)
+                    setattr(row, 'deviation', -1)
+                    setattr(row, 'chain', "N/A")
                     continue
                 target_structure = self.__get_structure__(target_file)
                 target_residues = [res for res in target_structure.get_residues()]
                 start_offset_residue = target_residues[position]
-                chain , chain_position = get_chain_position(target_structure,position)
+                chain, chain_position = get_chain_position(target_structure, position)
                 setattr(row, "chain",
                         "{0}".format(chain))
                 chain_length = self.get_chain_length(target_structure, start_offset_residue.full_id[2])
                 setattr(row, "chain_length", chain_length)
                 setattr(row, "chain_pos", chain_position)
+                setattr(row,"end_pos",chain_position+fragment_length)
                 current_deviation = self.__get_elenated_topology(
-                    source_residues[seq_start - 1: (seq_start + fragment_length)+ 1],
+                    source_residues[seq_start: (seq_start + fragment_length) + 1],
                     target_residues[position - 1:position + fragment_length + 1], len(seq))
                 setattr(row, "deviation", current_deviation)
                 self.calculate_rmsd_deviation(row, seq_start, fragment_length, aa_only=False)
@@ -355,57 +389,89 @@ class Patterning(object):
                 break
         return length
 
-    def get_chain_polypeptide(self,structure,pps,global_index):
-        chain , position_in_chain = get_chain_position(structure,global_index)
+    def get_chain_polypeptide(self, structure, pps, global_index):
+        chain, position_in_chain = get_chain_position(structure, global_index)
         polypeptides = [EPolyPeptide(pp) for pp in pps]
         current_chain = None
         for pp in polypeptides:
             if pp.chain_id == chain:
                 current_chain = pp
                 break
-        return chain , current_chain , position_in_chain
+        return chain, current_chain, position_in_chain
 
-    def calculate_rmsd_deviation(self,row,source_position,fragment_length,aa_only=False):
+    def calc_rmsd(self, source_atoms, target_atoms):
+        from math import sqrt
+        import numpy as np
+        from Bio.PDB.QCPSuperimposer import QCPSuperimposer
+        if len(source_atoms) != len(target_atoms):
+            return -1
+        source_arr = []
+        for atom in source_atoms:
+            xyz = [atom.coord[0], atom.coord[1], atom.coord[2]]
+            source_arr.append(xyz)
+        source_arr = np.array(source_arr)
+        target_arr = []
+        for atom in target_atoms:
+            xyz = [atom.coord[0], atom.coord[1], atom.coord[2]]
+            target_arr.append(xyz)
+        target_arr = np.array(target_arr)
+        sup = QCPSuperimposer()
+        sup.set(source_arr, target_arr)
+        sup.run()
+        return sup.get_rms()
+
+    def calculate_rmsd_deviation(self, row, source_position, fragment_length, aa_only=False):
         if self.args.source is None:
             setattr(row, "rmsd", -1)
         target_position = row.pos
         source_structure = self.__get_structure__(self.args.source)
         builder = PPBuilder()
-        source_pps = [x for x in builder.build_peptides(source_structure,aa_only=aa_only)]
+        source_pps = [x for x in builder.build_peptides(source_structure, aa_only=aa_only)]
         source_length = sum([len(x) for x in source_pps])
         source_residues = []
         for pp in source_pps:
             source_residues += [x for x in pp]
-        #source_backbones = [atom['CA'] for atom in source_residues[source_position:source_position + fragment_length+1]]
-        source_chain_name , source_chain , source_position_in_chain = self.get_chain_polypeptide(source_structure,source_pps,source_position)
-        source_backbones = [atom['CA'] for atom in source_chain[source_position_in_chain-1:source_position_in_chain+fragment_length]]
+        # source_backbones = [atom['CA'] for atom in source_residues[source_position:source_position + fragment_length+1]]
+        source_chain_name, source_chain, source_position_in_chain = self.get_chain_polypeptide(source_structure,
+                                                                                               source_pps,
+                                                                                               source_position)
+        source_backbones = [atom['CA'] for atom in
+                            source_chain[source_position_in_chain - 1:source_position_in_chain + fragment_length]]
+        source_backbone_residues = " ".join(
+            [x.resname for x in source_chain[source_position_in_chain - 1:source_position_in_chain + fragment_length]])
         builder = PPBuilder()
         target_file = self.get_target_file(row.protein_id)
         if target_file is None:
             setattr(row, "rmsd", -1)
             return
         target_structure = self.__get_structure__(target_file)
-        target_pps = [x for x in builder.build_peptides(target_structure,aa_only=aa_only)]
+        target_pps = [x for x in builder.build_peptides(target_structure, aa_only=aa_only)]
         target_length = sum([len(x) for x in target_pps])
         target_residues = []
         for pp in target_pps:
             target_residues += [x for x in pp]
-        #target_backbone = [atom['CA'] for atom in target_residues[target_position:target_position + fragment_length+1]]
-        target_chain_name , target_chain , target_position_in_chain = self.get_chain_polypeptide(target_structure,target_pps,target_position)
-        target_backbone = [atom['CA'] for atom in target_chain[target_position_in_chain-1:target_position_in_chain+fragment_length]]
-        lengths = [source_length,target_length]
+        # target_backbone = [atom['CA'] for atom in target_residues[target_position:target_position + fragment_length+1]]
+        target_chain_name, target_chain, target_position_in_chain = self.get_chain_polypeptide(target_structure,
+                                                                                               target_pps,
+                                                                                               target_position)
+        target_backbone = [atom['CA'] for atom in
+                           target_chain[target_position_in_chain - 1:target_position_in_chain + fragment_length]]
+        target_backbone_residues = " ".join(
+            [x.resname for x in target_chain[target_position_in_chain - 1:target_position_in_chain + fragment_length]])
+        lengths = [source_length, target_length]
         smallest = min(int(item) for item in lengths)
         # find RMSD
         if len(source_backbones) != len(target_backbone):
-            setattr(row,'rmsd',-1)
+            setattr(row, 'rmsd', -1)
             return
-        sup = Bio.PDB.Superimposer()
-        sup.set_atoms(source_backbones, target_backbone)
-        sup.apply(source_structure.get_atoms())
-        RMSD = round(sup.rms, 4)
+        # sup = Bio.PDB.Superimposer()
+        # sup.set_atoms(source_backbones, target_backbone)
+        # sup.apply(source_structure[0].get_atoms())
+        # RMSD = round(sup.rms, 4)
+        # print("RMSD For : {0} - {1} : {2}".format(source_backbone_residues,target_backbone_residues,RMSD))
+        RMSD = self.calc_rmsd(source_backbones, target_backbone)
+        RMSD = round(RMSD, 4)
         setattr(row, "rmsd", RMSD)
-
-
 
     def calculate_RMSD(self, row, source_position, fragment_length, aa_only=False):
         if self.args.source is None:
@@ -521,7 +587,6 @@ class Patterning(object):
         if total == 0:
             return 0.0
         else:
-
             return (abs(deviation) / float(seq_length)) * 100.0
 
     def process_patterning(self):
