@@ -1,6 +1,6 @@
 # Protein Propensities
 
-## introduction
+## Introduction
 This project contains two subprojects, 
 ### The first project
 the first project is a script that downloads the entire PDB database and calculates amino acids propensities in all proteins along with their secondary structure prediction and also it calculates the binary patterning based on structural 
