@@ -112,7 +112,7 @@ Then you can perform searches like so,
 
 `python patterning.py --source=<Where_is your PDB>/yourpdb.pdb --chain=<Chain_ID> --start=<Start position of your fragment> --end=<End position of your fragment> --fuzzy --fuzzylevel=0.50 --distance=2`
 
-Here `--fuzzylevel` is the ngram string similarity percentage > 50% and `--distance` is the lovenstein distance between two fuzzy strings
+Here `--fuzzylevel` is the ngram string similarity percentage >= 50% and `--distance` is the lovenstein distance between two fuzzy strings
 
 - Moreover, you supply `--deletions` `--insertions` and `--substitutions` to the fuzzy string search engine that suit your needs.
 
